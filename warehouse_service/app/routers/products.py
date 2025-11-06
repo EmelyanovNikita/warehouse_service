@@ -6,26 +6,8 @@ from app.models import ProductResponse
 
 # Импортируем зависимости из твоего проекта
 from app.database import get_db
-# from app.auth import get_current_user_role, require_admin  # если есть своя аутентификация
 
 router = APIRouter()
-
-# ==================== ЗАВИСИМОСТИ ====================
-
-# Временные заглушки (замени на свою систему аутентификации)
-def get_current_user_role(request: Request):
-    """Заглушка - замени на свою логику аутентификации"""
-    # Пример: проверка JWT токена, сессии и т.д.
-    return request.headers.get("X-User-Role", "user")  # временно из заголовка
-
-def require_admin(user_role: str = Depends(get_current_user_role)):
-    """Зависимость для проверки админских прав"""
-    if user_role != 'admin':
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
-    return user_role
 
 # ==================== PUBLIC ENDPOINTS ====================
 
@@ -102,62 +84,6 @@ def get_product_by_id(
         
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-
-# ==================== ADMIN ENDPOINTS ====================
-
-@router.get("/admin/products")
-def get_products_admin(
-    category: Optional[str] = None,
-    min_price: Optional[float] = None,
-    max_price: Optional[float] = None,
-    search: Optional[str] = None,
-    include_inactive: bool = Query(True, description="Включать неактивные товары"),
-    include_out_of_stock: bool = Query(True, description="Включать товары не в наличии"),
-    limit: int = Query(50, ge=1, le=100),
-    offset: int = Query(0, ge=0),
-    db: Session = Depends(get_db),
-    admin_role: str = Depends(require_admin)
-):
-    """Получить все товары (админская версия)"""
-    try:
-        result = db.execute(
-            text("CALL GetProductsForAdmins(:category, :min_price, :max_price, :search, :include_inactive, :include_out_of_stock, :limit, :offset)"),
-            {
-                'category': category,
-                'min_price': min_price,
-                'max_price': max_price,
-                'search': search,
-                'include_inactive': include_inactive,
-                'include_out_of_stock': include_out_of_stock,
-                'limit': limit,
-                'offset': offset
-            }
-        )
-        products = result.fetchall()
-        return [dict(product._mapping) for product in products]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-
-@router.get("/admin/products/{product_id}")
-def get_product_admin(
-    product_id: int,
-    db: Session = Depends(get_db),
-    admin_role: str = Depends(require_admin)
-):
-    """Получить товар по ID (админская версия со всеми полями)"""
-    try:
-        result = db.execute(
-            text("CALL GetProductByIdForAdmin(:product_id)"),
-            {'product_id': product_id}
-        )
-        
-        product = result.fetchone()
-        if not product:
-            raise HTTPException(status_code=404, detail="Product not found")
-        
-        return dict(product._mapping)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
