@@ -1,238 +1,220 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import text
+from typing import Optional, List
+from app.models import ProductResponse
 
+# Импортируем зависимости из твоего проекта
 from app.database import get_db
-from app import schemas
-from app import models
+# from app.auth import get_current_user_role, require_admin  # если есть своя аутентификация
 
-router = APIRouter(prefix="/products", tags=["products"])
+router = APIRouter()
 
-# Для клиентов - ограниченная информация
-@router.get("/", response_model=list[models.ProductClientResponse])
-def get_all_products(
-    skip: int = 0,
-    limit: int = 100,
+# ==================== ЗАВИСИМОСТИ ====================
+
+# Временные заглушки (замени на свою систему аутентификации)
+def get_current_user_role(request: Request):
+    """Заглушка - замени на свою логику аутентификации"""
+    # Пример: проверка JWT токена, сессии и т.д.
+    return request.headers.get("X-User-Role", "user")  # временно из заголовка
+
+def require_admin(user_role: str = Depends(get_current_user_role)):
+    """Зависимость для проверки админских прав"""
+    if user_role != 'admin':
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
+    return user_role
+
+# ==================== PUBLIC ENDPOINTS ====================
+
+@router.get("/", response_model=List[ProductResponse])
+def get_products(
+    category: Optional[str] = Query(None, description="Фильтр по категории"),
+    min_price: Optional[float] = Query(None, ge=0, description="Минимальная цена"),
+    max_price: Optional[float] = Query(None, ge=0, description="Максимальная цена"),
+    search: Optional[str] = Query(None, description="Поиск по названию"),
+    include_inactive: bool = Query(False, description="Включать неактивные товары"),
+    include_out_of_stock: bool = Query(False, description="Включать товары не в наличии"),
+    limit: int = Query(50, ge=1, le=100, description="Лимит записей"),
+    offset: int = Query(0, ge=0, description="Смещение"),
     db: Session = Depends(get_db)
 ):
-    """Получить все товары (клиентская версия)"""
+    """
+    Получить список товаров с фильтрами
+    
+    - **category**: Фильтр по названию категории
+    - **min_price**: Минимальная цена
+    - **max_price**: Максимальная цена  
+    - **search**: Поиск по названию товара
+    - **include_inactive**: Показать неактивные товары (по умолчанию false)
+    - **include_out_of_stock**: Показать товары не в наличии (по умолчанию false)
+    - **limit**: Количество записей (по умолчанию 50)
+    - **offset**: Смещение для пагинации (по умолчанию 0)
+    """
     try:
-        products = db.query(schemas.Product).filter(
-            schemas.Product.is_active == True
-        ).offset(skip).limit(limit).all()
+        result = db.execute(
+            text("CALL GetProducts(:category, :min_price, :max_price, :search, :include_inactive, :include_out_of_stock, :limit, :offset)"),
+            {
+                'category': category,
+                'min_price': min_price,
+                'max_price': max_price,
+                'search': search,
+                'include_inactive': include_inactive,
+                'include_out_of_stock': include_out_of_stock,
+                'limit': limit,
+                'offset': offset
+            }
+        )
         
-        result = []
-        for product in products:
-            result.append(models.ProductClientResponse(
-                id=product.id,
-                name=product.name,
-                sku=product.sku,
-                base_price=product.base_price,
-                total_quantity=product.total_quantity,
-                category_id=product.category_id
-            ))
+        products = result.fetchall()
+        return [dict(product._mapping) for product in products]
         
-        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-# Для админов - полная информация
-@router.get("/admin/", response_model=list[models.ProductAdminResponse])
-def get_all_products_admin(
-    skip: int = 0,
-    limit: int = 100,
+@router.get("/{product_id}", response_model=ProductResponse)
+def get_product_by_id(
+    product_id: int,
     db: Session = Depends(get_db)
+):
+    """
+    Получить товар по ID
+    
+    - **product_id**: ID товара
+    """
+    try:
+        result = db.execute(
+            text("CALL GetProductById(:product_id)"),
+            {'product_id': product_id}
+        )
+        
+        product = result.fetchone()
+        
+        if not product:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Product with ID {product_id} not found"
+            )
+            
+        return dict(product._mapping)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+# ==================== ADMIN ENDPOINTS ====================
+
+@router.get("/admin/products")
+def get_products_admin(
+    category: Optional[str] = None,
+    min_price: Optional[float] = None,
+    max_price: Optional[float] = None,
+    search: Optional[str] = None,
+    include_inactive: bool = Query(True, description="Включать неактивные товары"),
+    include_out_of_stock: bool = Query(True, description="Включать товары не в наличии"),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    admin_role: str = Depends(require_admin)
 ):
     """Получить все товары (админская версия)"""
     try:
-        products = db.query(schemas.Product).offset(skip).limit(limit).all()
-        
-        result = []
-        for product in products:
-            # Проверяем низкий остаток (например, меньше 10)
-            low_stock_alert = product.total_quantity < 10
-            
-            result.append(models.ProductAdminResponse(
-                id=product.id,
-                name=product.name,
-                sku=product.sku,
-                base_price=product.base_price,
-                total_quantity=product.total_quantity,
-                category_id=product.category_id,
-                is_active=product.is_active,
-                created_at=product.created_at,
-                updated_at=product.updated_at,
-                low_stock_alert=low_stock_alert
-            ))
-        
-        return result
+        result = db.execute(
+            text("CALL GetProductsForAdmins(:category, :min_price, :max_price, :search, :include_inactive, :include_out_of_stock, :limit, :offset)"),
+            {
+                'category': category,
+                'min_price': min_price,
+                'max_price': max_price,
+                'search': search,
+                'include_inactive': include_inactive,
+                'include_out_of_stock': include_out_of_stock,
+                'limit': limit,
+                'offset': offset
+            }
+        )
+        products = result.fetchall()
+        return [dict(product._mapping) for product in products]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-@router.get("/{product_id}")
-def get_product(product_id: int, db: Session = Depends(get_db)):
-    """Получить товар по ID (клиентская версия)"""
+@router.get("/admin/products/{product_id}")
+def get_product_admin(
+    product_id: int,
+    db: Session = Depends(get_db),
+    admin_role: str = Depends(require_admin)
+):
+    """Получить товар по ID (админская версия со всеми полями)"""
     try:
-        product = db.query(schemas.Product).filter(
-            schemas.Product.id == product_id,
-            schemas.Product.is_active == True
-        ).first()
-        
-        if not product:
-            raise HTTPException(status_code=404, detail="Product not found")
-        
-        # Получаем информацию о категории
-        category = db.query(schemas.Category).filter(
-            schemas.Category.id == product.category_id
-        ).first()
-        
-        # Определяем тип товара и получаем атрибуты
-        product_data = models.ProductClientResponse(
-            id=product.id,
-            name=product.name,
-            sku=product.sku,
-            base_price=product.base_price,
-            total_quantity=product.total_quantity,
-            category_id=product.category_id
+        result = db.execute(
+            text("CALL GetProductByIdForAdmin(:product_id)"),
+            {'product_id': product_id}
         )
         
-        # Добавляем атрибуты в зависимости от категории
-        response_data = {"product": product_data}
-        
-        # Если есть категория, можно добавить логику для атрибутов
-        if category:
-            response_data["category_name"] = category.name
-        
-        return response_data
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-
-@router.get("/admin/{product_id}")
-def get_product_admin(product_id: int, db: Session = Depends(get_db)):
-    """Получить товар по ID (админская версия)"""
-    try:
-        product = db.query(schemas.Product).filter(
-            schemas.Product.id == product_id
-        ).first()
-        
+        product = result.fetchone()
         if not product:
             raise HTTPException(status_code=404, detail="Product not found")
         
-        # Получаем информацию о категории
-        category = db.query(schemas.Category).filter(
-            schemas.Category.id == product.category_id
-        ).first()
-        
-        # Проверяем низкий остаток
-        low_stock_alert = product.total_quantity < 10
-        
-        product_data = models.ProductAdminResponse(
-            id=product.id,
-            name=product.name,
-            sku=product.sku,
-            base_price=product.base_price,
-            total_quantity=product.total_quantity,
-            category_id=product.category_id,
-            is_active=product.is_active,
-            created_at=product.created_at,
-            updated_at=product.updated_at,
-            low_stock_alert=low_stock_alert
+        return dict(product._mapping)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+# ==================== СПЕЦИАЛИЗИРОВАННЫЕ ФИЛЬТРЫ ====================
+
+@router.get("/category/thermocups")
+def get_thermocups(
+    volume_min: Optional[int] = Query(None, ge=0),
+    volume_max: Optional[int] = Query(None, ge=0),
+    color: Optional[str] = None,
+    brand: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db)
+):
+    """Получить термокружки с фильтрами (публичная версия)"""
+    try:
+        # Здесь нужно создать процедуру GetThermocupsForUsers или использовать существующую
+        result = db.execute(
+            text("CALL GetThermocupsByVolume(:volume_min, :volume_max, :color, :brand, :limit, :offset)"),
+            {
+                'volume_min': volume_min,
+                'volume_max': volume_max,
+                'color': color,
+                'brand': brand,
+                'limit': limit,
+                'offset': offset
+            }
         )
-        
-        response_data = {"product": product_data}
-        
-        # Получаем специфичные атрибуты в зависимости от категории
-        if category:
-            response_data["category_name"] = category.name
-            
-            # Для серверов
-            if "server" in category.name.lower():
-                server_attrs = db.query(schemas.ProductAttributesServer).filter(
-                    schemas.ProductAttributesServer.product_id == product_id
-                ).first()
-                if server_attrs:
-                    response_data["server_attributes"] = server_attrs
-            
-            # Для термокружек
-            elif "thermocup" in category.name.lower():
-                thermocup_attrs = db.query(schemas.ProductAttributesThermocup).filter(
-                    schemas.ProductAttributesThermocup.product_id == product_id
-                ).first()
-                if thermocup_attrs:
-                    response_data["thermocup_attributes"] = thermocup_attrs
-        
-        return response_data
-        
-    except HTTPException:
-        raise
+        products = result.fetchall()
+        return [dict(product._mapping) for product in products]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-@router.get("/search/{product_name}")
-def search_product_by_name(product_name: str, db: Session = Depends(get_db)):
-    """Поиск товара по названию (клиентская версия)"""
+@router.get("/category/servers")
+def get_servers(
+    ram_min: Optional[int] = Query(None, ge=0),
+    cpu_cores_min: Optional[int] = Query(None, ge=0),
+    form_factor: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db)
+):
+    """Получить серверы с фильтрами (публичная версия)"""
     try:
-        product = db.query(schemas.Product).filter(
-            func.lower(schemas.Product.name).like(f"%{product_name.lower()}%"),
-            schemas.Product.is_active == True
-        ).first()
-        
-        if not product:
-            raise HTTPException(status_code=404, detail="Product not found")
-        
-        return {
-            "product": models.ProductClientResponse(
-                id=product.id,
-                name=product.name,
-                sku=product.sku,
-                base_price=product.base_price,
-                total_quantity=product.total_quantity,
-                category_id=product.category_id
-            )
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-
-@router.get("/category/{category_name}")
-def get_products_by_category(category_name: str, db: Session = Depends(get_db)):
-    """Получить товары по категории (клиентская версия)"""
-    try:
-        # Находим категорию
-        category = db.query(schemas.Category).filter(
-            func.lower(schemas.Category.name) == func.lower(category_name)
-        ).first()
-        
-        if not category:
-            raise HTTPException(status_code=404, detail="Category not found")
-        
-        # Находим товары этой категории
-        products = db.query(schemas.Product).filter(
-            schemas.Product.category_id == category.id,
-            schemas.Product.is_active == True
-        ).all()
-        
-        products_data = []
-        for product in products:
-            products_data.append(models.ProductClientResponse(
-                id=product.id,
-                name=product.name,
-                sku=product.sku,
-                base_price=product.base_price,
-                total_quantity=product.total_quantity,
-                category_id=product.category_id
-            ))
-        
-        return {
-            "category": category.name,
-            "products": products_data,
-            "total_count": len(products_data)
-        }
-    except HTTPException:
-        raise
+        # Здесь нужно создать процедуру GetServersForUsers
+        result = db.execute(
+            text("CALL GetServersBySpecs(:ram_min, :cpu_cores_min, :form_factor, :limit, :offset)"),
+            {
+                'ram_min': ram_min,
+                'cpu_cores_min': cpu_cores_min,
+                'form_factor': form_factor,
+                'limit': limit,
+                'offset': offset
+            }
+        )
+        products = result.fetchall()
+        return [dict(product._mapping) for product in products]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
