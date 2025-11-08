@@ -42,17 +42,17 @@ class ThermocupAttributes(BaseModel):
     material: Optional[str] = None
 
 # Комбинированные ответы с атрибутами
-class ServerProductClientResponse(ProductClientResponse):
-    attributes: ServerAttributes
+# class ServerProductClientResponse(ProductClientResponse):
+#     attributes: ServerAttributes
 
-class ServerProductAdminResponse(ProductAdminResponse):
-    attributes: ServerAttributes
+# class ServerProductAdminResponse(ProductAdminResponse):
+#     attributes: ServerAttributes
 
-class ThermocupProductClientResponse(ProductClientResponse):
-    attributes: ThermocupAttributes
+# class ThermocupProductClientResponse(ProductClientResponse):
+#     attributes: ThermocupAttributes
 
-class ThermocupProductAdminResponse(ProductAdminResponse):
-    attributes: ThermocupAttributes
+# class ThermocupProductAdminResponse(ProductAdminResponse):
+#     attributes: ThermocupAttributes
 
 class ProductResponse(BaseModel):
     id: int
