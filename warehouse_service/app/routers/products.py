@@ -9,6 +9,7 @@ from app.models import ReservedGoodsResponse
 from app.models import UpdateReservedGoodsRequest
 from app.models import StockQuantityResponse
 from app.models import UpdateStockQuantityRequest
+from app.models import ThermocupResponse
 
 # Импортируем зависимости из твоего проекта
 from app.database import get_db
@@ -96,6 +97,43 @@ def get_product_by_id(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@router.get("/thermocups/{product_id}", response_model=ThermocupResponse)
+def get_thermocup_by_id(
+    product_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Получить детальную информацию о термокружке по ID
+    
+    Возвращает:
+    - Все поля из ProductResponse (базовые данные товара)
+    - Специфичные атрибуты термокружки
+    - Информацию о наличии на складах
+    """
+    try:
+        result = db.execute(
+            text("CALL GetThermocupById(:product_id)"),
+            {'product_id': product_id}
+        )
+        
+        thermocup = result.fetchone()
+        
+        if not thermocup:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Thermocup with ID {product_id} not found"
+            )
+            
+        return dict(thermocup._mapping)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Database error: {str(e)}"
+        )
 
 # ==================== СПЕЦИАЛИЗИРОВАННЫЕ ФИЛЬТРЫ ====================
 

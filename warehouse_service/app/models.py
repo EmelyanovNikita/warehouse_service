@@ -112,15 +112,16 @@ class ProductResponse(BaseModel):
     updated_at: Optional[datetime] = None
     path_to_photo: Optional[str] = None
 
-    # check
-    volume_ml: Optional[int] = None
-    color: Optional[str] = None
-    brand: Optional[str] = None
-    ram_gb: Optional[int] = None
-    cpu_model: Optional[str] = None
-    cpu_cores: Optional[int] = None
-    form_factor: Optional[str] = None
-    manufacturer: Optional[str] = None
-
     class Config:
         from_attributes = True
+
+class ThermocupResponse(ProductResponse):
+    # Специфичные атрибуты термокружки
+    volume_ml: int
+    color: str
+    brand: str
+    model: Optional[str] = None
+    is_hermetic: bool
+    material: Optional[str] = None
+    # Информация по складам
+    warehouse_info: Optional[str] = None
