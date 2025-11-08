@@ -4,6 +4,11 @@ from sqlalchemy import text
 from typing import Optional, List
 from app.models import ProductResponse
 from app.models import ProductCreateThermocup
+from app.models import ProductUpdateThermocup
+from app.models import ReservedGoodsResponse
+from app.models import UpdateReservedGoodsRequest
+from app.models import StockQuantityResponse
+from app.models import UpdateStockQuantityRequest
 
 # Импортируем зависимости из твоего проекта
 from app.database import get_db
@@ -182,3 +187,261 @@ def create_thermocup(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Ошибка при создании термокружки: {error_msg}"
             )
+
+# ==================== Обновление продукта Thermocup =====================
+
+@router.put("/thermocups/{product_id}", response_model=ProductResponse)
+def update_thermocup(
+    product_id: int,
+    product_data: ProductUpdateThermocup,
+    db: Session = Depends(get_db)
+):
+    """
+    Обновить термокружку по ID
+    
+    - **product_id**: ID товара для обновления
+    - Обновляемые поля (все опциональны):
+        - **name**: Название термокружки
+        - **category_id**: ID категории
+        - **base_price**: Базовая цена
+        - **sku**: SKU код
+        - **is_active**: Активен ли товар
+        - **path_to_photo**: Путь к фото
+        - **attributes**: Специфичные атрибуты термокружки
+    """
+    try:
+        print(f"LOG: update_thermocup: обновление товара ID {product_id}")
+        
+        # Подготавливаем параметры для процедуры
+        params = {
+            'product_id': product_id,
+            'name': product_data.name,
+            'category_id': product_data.category_id,
+            'base_price': product_data.base_price,
+            'sku': product_data.sku,
+            'is_active': product_data.is_active,
+            'path_to_photo': product_data.path_to_photo,
+            # Атрибуты термокружки (может быть None)
+            'volume_ml': None,
+            'color': None,
+            'brand': None,
+            'model': None,
+            'is_hermetic': None,
+            'material': None
+        }
+        
+        # Если переданы атрибуты, заполняем их
+        if product_data.attributes:
+            params.update({
+                'volume_ml': product_data.attributes.volume_ml,
+                'color': product_data.attributes.color,
+                'brand': product_data.attributes.brand,
+                'model': product_data.attributes.model,
+                'is_hermetic': product_data.attributes.is_hermetic,
+                'material': product_data.attributes.material
+            })
+        
+        print(f"LOG: Параметры обновления: {params}")
+        
+        # Вызываем хранимую процедуру для обновления
+        result = db.execute(
+            text("CALL UpdateThermocup(:product_id, :name, :category_id, :base_price, :sku, :is_active, :path_to_photo, :volume_ml, :color, :brand, :model, :is_hermetic, :material)"),
+            params
+        )
+        
+        # Получаем обновленный товар
+        updated_product = result.fetchone()
+        
+        if not updated_product:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Товар не найден"
+            )
+        
+        # Фиксируем изменения в БД
+        db.commit()
+        print(f"LOG: Товар ID {product_id} успешно обновлен")
+        
+        return dict(updated_product._mapping)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Откатываем изменения в случае ошибки
+        db.rollback()
+        error_msg = str(e)
+        
+        print(f"LOG: Ошибка при обновлении товара: {error_msg}")
+        
+        # Обрабатываем возможные ошибки БД
+        if "Duplicate entry" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Товар с таким SKU уже существует"
+            )
+        elif "foreign key constraint fails" in error_msg and "category_id" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Указанная категория не существует"
+            )
+        elif "Product not found" in error_msg or "doesn't exist" in error_msg.lower():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Товар не найден"
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Ошибка при обновлении термокружки: {error_msg}"
+            )
+
+@router.patch("/thermocups/{product_id}/reserved", response_model=ReservedGoodsResponse)
+def update_thermocup_num_reserved_goods(
+    product_id: int,
+    request: UpdateReservedGoodsRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Обновить количество зарезервированного товара
+    
+    - **product_id**: ID товара
+    - **quantity_change**: Изменение количества (положительное - прибавить, отрицательное - отнять)
+    """
+    try:
+        print(f"LOG: update_thermocup_num_reserved_goods: товар ID {product_id}, изменение: {request.quantity_change}")
+        
+        result = db.execute(
+            text("CALL UpdateProductReservedGoods(:product_id, :quantity_change)"),
+            {
+                'product_id': product_id,
+                'quantity_change': request.quantity_change
+            }
+        )
+        
+        updated_product = result.fetchone()
+        
+        if not updated_product:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Товар не найден"
+            )
+        
+        db.commit()
+        
+        print(f"LOG: Зарезервированное количество обновлено: {dict(updated_product._mapping)}")
+        
+        return dict(updated_product._mapping)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        error_msg = str(e)
+        print(f"LOG: Ошибка при обновлении зарезервированного количества: {error_msg}")
+        
+        if "Product not found" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Товар не найден"
+            )
+        elif "Reserved quantity cannot be negative" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Зарезервированное количество не может быть отрицательным"
+            )
+        elif "Not enough available goods to reserve" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Недостаточно доступного товара для резервирования"
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Ошибка при обновлении зарезервированного количества: {error_msg}"
+            )
+
+@router.patch("/thermocups/{product_id}/stock", response_model=StockQuantityResponse)
+def update_thermocup_quantity(
+    product_id: int,
+    request: UpdateStockQuantityRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Обновить количество товара на складе
+    
+    - **product_id**: ID товара
+    - **warehouse_id**: ID склада
+    - **quantity_change**: Изменение количества (положительное - прибавить, отрицательное - отнять)
+    """
+    try:
+        print(f"LOG: update_thermocup_quantity: товар ID {product_id}, склад ID {request.warehouse_id}, изменение: {request.quantity_change}")
+        
+        result = db.execute(
+            text("CALL UpdateProductStockQuantity(:product_id, :warehouse_id, :quantity_change)"),
+            {
+                'product_id': product_id,
+                'warehouse_id': request.warehouse_id,
+                'quantity_change': request.quantity_change
+            }
+        )
+        
+        updated_stock = result.fetchone()
+        
+        if not updated_stock:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Товар или склад не найден"
+            )
+        
+        db.commit()
+        
+        print(f"LOG: Количество на складе обновлено: {dict(updated_stock._mapping)}")
+        
+        return dict(updated_stock._mapping)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        error_msg = str(e)
+        print(f"LOG: Ошибка при обновлении количества на складе: {error_msg}")
+        
+        if "Product not found" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Товар не найден"
+            )
+        elif "Warehouse not found" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Склад не найден"
+            )
+        elif "Stock quantity cannot be negative" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Количество на складе не может быть отрицательным"
+            )
+        elif "Cannot remove quantity from non-existing stock" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Нельзя уменьшить количество несуществующего запаса"
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Ошибка при обновлении количества на складе: {error_msg}"
+            )
+
+# @router.patch("/thermocups/{product_id}", response_model=ProductResponse)
+# def update_thermocup_(
+#     product_id: int,
+#     product_data: ProductUpdateThermocup,
+#     db: Session = Depends(get_db)
+# ):
+#     """
+#     Частично обновить термокружку по ID (PATCH)
+    
+#     - **product_id**: ID товара для обновления
+#     - Обновляемые поля (только указанные поля будут обновлены)
+#     """
+#     return update_thermocup(product_id, product_data, db)

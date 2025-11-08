@@ -41,6 +41,7 @@ class ThermocupAttributes(BaseModel):
     is_hermetic: bool
     material: Optional[str] = None
 
+# ====================== Create =========================
 class ProductCreateBase(BaseModel):
     name: str
     category_id: int
@@ -53,6 +54,48 @@ class ProductCreateBase(BaseModel):
 # Модель для создания термокружки
 class ProductCreateThermocup(ProductCreateBase):
     attributes: ThermocupAttributes
+
+# ==================== Update ===============================
+class ProductUpdateBase(BaseModel):
+    name: Optional[str] = None
+    category_id: Optional[int] = None
+    base_price: Optional[float] = None
+    sku: Optional[str] = None
+    is_active: Optional[bool] = None
+    path_to_photo: Optional[str] = None
+
+class ThermocupAttributesUpdate(BaseModel):
+    volume_ml: Optional[int] = None
+    color: Optional[str] = None
+    brand: Optional[str] = None
+    model: Optional[str] = None
+    is_hermetic: Optional[bool] = None
+    material: Optional[str] = None
+
+class ProductUpdateThermocup(ProductUpdateBase):
+    attributes: Optional[ThermocupAttributesUpdate] = None
+
+class UpdateReservedGoodsRequest(BaseModel):
+    quantity_change: int
+
+class UpdateStockQuantityRequest(BaseModel):
+    warehouse_id: int
+    quantity_change: int
+
+class ReservedGoodsResponse(BaseModel):
+    id: int
+    name: str
+    reserved_quantity: int
+    total_quantity: int
+    available_quantity: int
+
+class StockQuantityResponse(BaseModel):
+    product_id: int
+    product_name: str
+    warehouse_id: int
+    warehouse_name: str
+    current_quantity: int
+    total_quantity_all_warehouses: int
 
 class ProductResponse(BaseModel):
     id: int
@@ -67,6 +110,7 @@ class ProductResponse(BaseModel):
     # Time of create/update of product
     created_at: datetime
     updated_at: Optional[datetime] = None
+    path_to_photo: Optional[str] = None
 
     # check
     volume_ml: Optional[int] = None
