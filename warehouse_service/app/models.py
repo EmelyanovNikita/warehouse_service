@@ -41,29 +41,42 @@ class ThermocupAttributes(BaseModel):
     is_hermetic: bool
     material: Optional[str] = None
 
-# Комбинированные ответы с атрибутами
-# class ServerProductClientResponse(ProductClientResponse):
-#     attributes: ServerAttributes
+class ProductCreateBase(BaseModel):
+    name: str
+    category_id: int
+    base_price: float
+    # description: Optional[str] = None
+    initial_quantity: Optional[int] = None  # Может быть не указано
+    warehouse_id: Optional[int] = None      # Может быть не указано
+    path_to_photo: Optional[str] = None
 
-# class ServerProductAdminResponse(ProductAdminResponse):
-#     attributes: ServerAttributes
-
-# class ThermocupProductClientResponse(ProductClientResponse):
-#     attributes: ThermocupAttributes
-
-# class ThermocupProductAdminResponse(ProductAdminResponse):
-#     attributes: ThermocupAttributes
+# Модель для создания термокружки
+class ProductCreateThermocup(ProductCreateBase):
+    attributes: ThermocupAttributes
 
 class ProductResponse(BaseModel):
     id: int
     name: str
-    sku: str
+    sku: Optional[str] = None
     category_name: str
     base_price: float
-    total_quantity: int
+
+    total_quantity: int #удалить
     is_active: bool
+
+    # Time of create/update of product
     created_at: datetime
     updated_at: Optional[datetime] = None
+
+    # check
+    volume_ml: Optional[int] = None
+    color: Optional[str] = None
+    brand: Optional[str] = None
+    ram_gb: Optional[int] = None
+    cpu_model: Optional[str] = None
+    cpu_cores: Optional[int] = None
+    form_factor: Optional[str] = None
+    manufacturer: Optional[str] = None
 
     class Config:
         from_attributes = True

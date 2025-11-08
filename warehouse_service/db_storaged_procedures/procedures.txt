@@ -62,3 +62,216 @@ BEGIN
 END //
 
 DELIMITER ;
+
+DELIMITER //
+
+CREATE PROCEDURE CreateProduct(
+    IN p_name VARCHAR(255),
+    IN p_category_id INT,
+    IN p_base_price DECIMAL(10,2),
+    IN p_description TEXT,
+    OUT p_new_product_id INT
+)
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        RESIGNAL;
+    END;
+    
+    START TRANSACTION;
+    
+    -- Создаем товар в основной таблице
+    INSERT INTO products (name, category_id, base_price, description)
+    VALUES (p_name, p_category_id, p_base_price, p_description);
+    
+    -- Возвращаем ID нового товара
+    SET p_new_product_id = LAST_INSERT_ID();
+    
+    COMMIT;
+END //
+
+DELIMITER ;
+
+DELIMITER //
+
+CREATE PROCEDURE CreateAttributesThermos(
+    IN p_product_id INT,
+    IN p_volume_ml INT,
+    IN p_color VARCHAR(100),
+    IN p_brand VARCHAR(255),
+    IN p_model VARCHAR(255),
+    IN p_is_hermetic BOOLEAN,
+    IN p_material VARCHAR(100)
+)
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        RESIGNAL;
+    END;
+    
+    START TRANSACTION;
+    
+    INSERT INTO product_attributes_thermocups (
+        product_id, volume_ml, color, brand, model, is_hermetic, material
+    ) VALUES (
+        p_product_id, p_volume_ml, p_color, p_brand, p_model, p_is_hermetic, p_material
+    );
+    
+    COMMIT;
+END //
+
+DELIMITER ;
+
+DELIMITER //
+
+CREATE PROCEDURE CreateAttributesServer(
+    IN p_product_id INT,
+    IN p_ram_gb INT,
+    IN p_cpu_model VARCHAR(255),
+    IN p_cpu_cores INT,
+    IN p_hdd_size_gb INT,
+    IN p_ssd_size_gb INT,
+    IN p_form_factor ENUM('Rack','Tower','Blade'),
+    IN p_manufacturer VARCHAR(255)
+)
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        RESIGNAL;
+    END;
+    
+    START TRANSACTION;
+    
+    INSERT INTO product_attributes_servers (
+        product_id, ram_gb, cpu_model, cpu_cores, hdd_size_gb, ssd_size_gb, form_factor, manufacturer
+    ) VALUES (
+        p_product_id, p_ram_gb, p_cpu_model, p_cpu_cores, p_hdd_size_gb, p_ssd_size_gb, p_form_factor, p_manufacturer
+    );
+    
+    COMMIT;
+END //
+
+DELIMITER ;
+
+DELIMITER //
+
+CREATE PROCEDURE AddProductQuantity(
+    IN p_product_id INT,
+    IN p_warehouse_id INT,
+    IN p_quantity INT
+)
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        RESIGNAL;
+    END;
+    
+    START TRANSACTION;
+    
+    -- Добавляем запись на склад только если quantity > 0
+    IF p_quantity > 0 THEN
+        INSERT INTO product_stocks (product_id, warehouse_id, quantity)
+        VALUES (p_product_id, p_warehouse_id, p_quantity);
+    END IF;
+    
+    COMMIT;
+END //
+
+DELIMITER ;
+
+DELIMITER //
+
+CREATE PROCEDURE CreateThermos(
+    IN p_name VARCHAR(255),
+    IN p_category_id INT,
+    IN p_base_price DECIMAL(10,2),
+    IN p_description TEXT,
+    IN p_initial_quantity INT,
+    IN p_warehouse_id INT,
+    -- Атрибуты термокружки
+    IN p_volume_ml INT,
+    IN p_color VARCHAR(100),
+    IN p_brand VARCHAR(255),
+    IN p_model VARCHAR(255),
+    IN p_is_hermetic BOOLEAN,
+    IN p_material VARCHAR(100)
+)
+BEGIN
+    DECLARE new_product_id INT;
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        RESIGNAL;
+    END;
+    
+    START TRANSACTION;
+    
+    -- 1. Создаем основной товар
+    CALL CreateProduct(p_name, p_category_id, p_base_price, p_description, new_product_id);
+    
+    -- 2. Создаем атрибуты термокружки
+    CALL CreateAttributesThermos(new_product_id, p_volume_ml, p_color, p_brand, p_model, p_is_hermetic, p_material);
+    
+    -- 3. ОПЦИОНАЛЬНО: добавляем остатки если указаны
+    IF p_initial_quantity IS NOT NULL AND p_warehouse_id IS NOT NULL THEN
+        CALL AddProductQuantity(new_product_id, p_warehouse_id, p_initial_quantity);
+    END IF;
+    
+    COMMIT;
+    
+    -- Возвращаем созданный товар
+    CALL GetProductById(new_product_id);
+END //
+
+DELIMITER ;
+
+DELIMITER //
+
+CREATE PROCEDURE CreateServer(
+    IN p_name VARCHAR(255),
+    IN p_category_id INT,
+    IN p_base_price DECIMAL(10,2),
+    IN p_description TEXT,
+    IN p_initial_quantity INT,
+    IN p_warehouse_id INT,
+    -- Атрибуты сервера
+    IN p_ram_gb INT,
+    IN p_cpu_model VARCHAR(255),
+    IN p_cpu_cores INT,
+    IN p_hdd_size_gb INT,
+    IN p_ssd_size_gb INT,
+    IN p_form_factor ENUM('Rack','Tower','Blade'),
+    IN p_manufacturer VARCHAR(255)
+)
+BEGIN
+    DECLARE new_product_id INT;
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        RESIGNAL;
+    END;
+    
+    START TRANSACTION;
+    
+    -- 1. Создаем основной товар
+    CALL CreateProduct(p_name, p_category_id, p_base_price, p_description, new_product_id);
+    
+    -- 2. Создаем атрибуты сервера
+    CALL CreateAttributesServer(new_product_id, p_ram_gb, p_cpu_model, p_cpu_cores, p_hdd_size_gb, p_ssd_size_gb, p_form_factor, p_manufacturer);
+    
+    -- 3. ОПЦИОНАЛЬНО: добавляем остатки если указаны
+    IF p_initial_quantity IS NOT NULL AND p_warehouse_id IS NOT NULL THEN
+        CALL AddProductQuantity(new_product_id, p_warehouse_id, p_initial_quantity);
+    END IF;
+    
+    COMMIT;
+    
+    -- Возвращаем созданный товар
+    CALL GetProductById(new_product_id);
+END //
+
+DELIMITER ;
