@@ -4,6 +4,7 @@ from decimal import Decimal
 from datetime import datetime
 from typing import Optional, Union
 
+
 # Базовые схемы для создания
 class ProductCreate(BaseModel):
     name: str
@@ -21,22 +22,6 @@ class ProductInDB(ProductCreate):
     
     class Config:
         from_attributes = True
-
-# ОТВЕТЫ ДЛЯ КЛИЕНТОВ (минимальная информация)
-class ProductClientResponse(BaseModel):
-    id: int
-    name: str
-    sku: str
-    base_price: Decimal
-    total_quantity: int
-    category_id: int
-
-# ОТВЕТЫ ДЛЯ АДМИНОВ (полная информация)
-class ProductAdminResponse(ProductClientResponse):
-    is_active: bool
-    created_at: datetime
-    updated_at: datetime
-    low_stock_alert: bool = Field(False, description="Флаг низкого остатка")
 
 # Специфичные атрибуты
 class ServerAttributes(BaseModel):

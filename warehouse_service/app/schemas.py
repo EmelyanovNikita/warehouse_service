@@ -79,3 +79,17 @@ class ProductStock(Base):
     
     product = relationship("Product", back_populates="stocks")
     warehouse = relationship("Warehouse", back_populates="stocks")
+
+class ProductResponse(BaseModel):
+    id: int
+    name: str
+    sku: str
+    category_name: str
+    base_price: float
+    total_quantity: int
+    is_active: bool
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
