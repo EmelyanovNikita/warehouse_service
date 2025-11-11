@@ -60,7 +60,6 @@ def get_products(
         )
         
         products = result.fetchall()
-        print(products)
         return [dict(product._mapping) for product in products]
         
     except Exception as e:
@@ -140,7 +139,7 @@ def get_thermocup_by_id(
 
 # ==================== Запрос на создание Termos =====================
 
-@router.post("/products/thermocups/create/", response_model=ProductResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/products/thermocups/create", response_model=ProductResponse, status_code=status.HTTP_201_CREATED)
 def create_thermocup(
     product_data: ProductCreateThermocup,
     db: Session = Depends(get_db)
@@ -334,7 +333,7 @@ def update_thermocup(
                 detail=f"Ошибка при обновлении термокружки: {error_msg}"
             )
 
-@router.patch("/products/thermocups/reserved/{product_id}", response_model=ReservedGoodsResponse)
+@router.patch("/products/thermocups/update/{product_id}/reserved", response_model=ReservedGoodsResponse)
 def update_thermocup_num_reserved_goods(
     product_id: int,
     request: UpdateReservedGoodsRequest,
@@ -399,7 +398,7 @@ def update_thermocup_num_reserved_goods(
                 detail=f"Ошибка при обновлении зарезервированного количества: {error_msg}"
             )
 
-@router.patch("/products/thermocups/{product_id}/stock", response_model=StockQuantityResponse)
+@router.patch("/products/thermocups/update/{product_id}/stock", response_model=StockQuantityResponse)
 def update_thermocup_quantity(
     product_id: int,
     request: UpdateStockQuantityRequest,
