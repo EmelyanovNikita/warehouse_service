@@ -1,4 +1,3 @@
-DELIMITER //
 
 CREATE PROCEDURE GetProducts(
     IN p_category_name VARCHAR(255),
@@ -34,11 +33,7 @@ BEGIN
         (p_include_out_of_stock = TRUE OR total_quantity > 0)
     ORDER BY p.is_active DESC, total_quantity DESC, p.name
     LIMIT p_limit OFFSET p_offset;
-END //
-
-DELIMITER ;
-
-DELIMITER //
+END;
 
 CREATE PROCEDURE GetProductById(
     IN p_product_id INT
@@ -59,11 +54,7 @@ BEGIN
     LEFT JOIN product_stocks ps ON p.id = ps.product_id
     WHERE p.id = p_product_id
     GROUP BY p.id, p.name, p.sku, c.name, p.base_price, p.is_active, p.created_at, p.updated_at;
-END //
-
-DELIMITER ;
-
-DELIMITER //
+END ;
 
 CREATE PROCEDURE CreateProduct(
     IN p_name VARCHAR(255),
@@ -89,11 +80,7 @@ BEGIN
     SET p_new_product_id = LAST_INSERT_ID();
     
     COMMIT;
-END //
-
-DELIMITER ;
-
-DELIMITER //
+END;
 
 CREATE PROCEDURE CreateAttributesThermos(
     IN p_product_id INT,
@@ -120,11 +107,7 @@ BEGIN
     );
     
     COMMIT;
-END //
-
-DELIMITER ;
-
-DELIMITER //
+END ;
 
 CREATE PROCEDURE CreateAttributesServer(
     IN p_product_id INT,
@@ -152,11 +135,7 @@ BEGIN
     );
     
     COMMIT;
-END //
-
-DELIMITER ;
-
-DELIMITER //
+END ;
 
 CREATE PROCEDURE AddProductQuantity(
     IN p_product_id INT,
@@ -179,11 +158,7 @@ BEGIN
     END IF;
     
     COMMIT;
-END //
-
-DELIMITER ;
-
-DELIMITER //
+END ;
 
 CREATE PROCEDURE CreateThermos(
     IN p_name VARCHAR(255),
@@ -225,11 +200,7 @@ BEGIN
     
     -- Возвращаем созданный товар
     CALL GetProductById(new_product_id);
-END //
-
-DELIMITER ;
-
-DELIMITER //
+END ;
 
 CREATE PROCEDURE CreateServer(
     IN p_name VARCHAR(255),
@@ -272,6 +243,330 @@ BEGIN
     
     -- Возвращаем созданный товар
     CALL GetProductById(new_product_id);
-END //
+END ;
 
-DELIMITER ;
+
+CREATE PROCEDURE GetThermocupById(
+    IN p_product_id INT
+)
+BEGIN
+    SELECT 
+        p.id,
+        p.name,
+        p.sku,
+        c.name as category_name,
+        p.base_price,
+        COALESCE(SUM(ps.quantity), 0) as total_quantity,
+        p.is_active,
+        p.created_at,
+        p.updated_at,
+        -- Атрибуты термокружки
+        pt.volume_ml,
+        pt.color,
+        pt.brand,
+        pt.model,
+        pt.is_hermetic,
+        pt.material,
+        -- Информация по складам
+        GROUP_CONCAT(
+            DISTINCT CONCAT(w.name, ' (', ps.quantity, ' шт)') 
+            SEPARATOR ', '
+        ) as warehouse_info
+    FROM products p
+    JOIN categories c ON p.category_id = c.id
+    JOIN product_attributes_thermocups pt ON p.id = pt.product_id
+    LEFT JOIN product_stocks ps ON p.id = ps.product_id
+    LEFT JOIN warehouses w ON ps.warehouse_id = w.id
+    WHERE p.id = p_product_id AND c.name = 'Thermocups'
+    GROUP BY 
+        p.id, p.name, p.sku, c.name, p.base_price, 
+        p.is_active, p.created_at, p.updated_at,
+        pt.volume_ml, pt.color, pt.brand, pt.model, pt.is_hermetic, pt.material;
+END
+
+CREATE PROCEDURE UpdateProduct(
+    IN p_product_id INT,
+    IN p_name VARCHAR(255),
+    IN p_category_id INT,
+    IN p_base_price DECIMAL(10,2),
+    IN p_sku VARCHAR(100),
+    IN p_is_active BOOLEAN,
+    IN p_path_to_photo VARCHAR(255)
+)
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        RESIGNAL;
+    END;
+    
+    START TRANSACTION;
+    
+    UPDATE products 
+    SET 
+        name = COALESCE(p_name, name),
+        category_id = COALESCE(p_category_id, category_id),
+        base_price = COALESCE(p_base_price, base_price),
+        sku = COALESCE(p_sku, sku),
+        is_active = COALESCE(p_is_active, is_active),
+        path_to_photo = COALESCE(p_path_to_photo, path_to_photo),
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = p_product_id;
+    
+    COMMIT;
+END
+
+CREATE PROCEDURE UpdateProductReservedGoods(
+    IN p_product_id INT,
+    IN p_quantity_change INT
+)
+BEGIN
+    DECLARE current_reserved INT;
+    DECLARE total_available INT;
+    DECLARE new_reserved INT;
+    DECLARE product_exists INT DEFAULT 0;
+    
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        RESIGNAL;
+    END;
+    
+    -- Проверяем существование товара
+    SELECT COUNT(*) INTO product_exists 
+    FROM products 
+    WHERE id = p_product_id;
+    
+    IF product_exists = 0 THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Product not found';
+    END IF;
+    
+    START TRANSACTION;
+    
+    -- Получаем текущее зарезервированное количество
+    SELECT COALESCE(num_reserved_goods, 0) INTO current_reserved
+    FROM products 
+    WHERE id = p_product_id;
+    
+    -- Получаем общее доступное количество
+    SELECT COALESCE(SUM(quantity), 0) INTO total_available
+    FROM product_stocks 
+    WHERE product_id = p_product_id;
+    
+    -- Вычисляем новое зарезервированное количество
+    SET new_reserved = current_reserved + p_quantity_change;
+    
+    -- Проверяем, что новое значение не отрицательное и не превышает доступное количество
+    IF new_reserved < 0 THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Reserved quantity cannot be negative';
+    END IF;
+    
+    IF new_reserved > total_available THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Not enough available goods to reserve';
+    END IF;
+    
+    -- Обновляем зарезервированное количество
+    UPDATE products 
+    SET 
+        num_reserved_goods = new_reserved,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = p_product_id;
+    
+    COMMIT;
+    
+    -- Возвращаем обновленную информацию
+    SELECT 
+        p.id,
+        p.name,
+        p.num_reserved_goods as reserved_quantity,
+        COALESCE(SUM(ps.quantity), 0) as total_quantity,
+        (COALESCE(SUM(ps.quantity), 0) - p.num_reserved_goods) as available_quantity
+    FROM products p
+    LEFT JOIN product_stocks ps ON p.id = ps.product_id
+    WHERE p.id = p_product_id
+    GROUP BY p.id, p.name, p.num_reserved_goods;
+    
+END
+
+CREATE UpdateProductStockQuantity(
+    IN p_product_id INT,
+    IN p_warehouse_id INT,
+    IN p_quantity_change INT
+)
+BEGIN
+    DECLARE current_quantity INT;
+    DECLARE new_quantity INT;
+    DECLARE product_exists INT DEFAULT 0;
+    DECLARE warehouse_exists INT DEFAULT 0;
+    DECLARE stock_exists INT DEFAULT 0;
+    
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        RESIGNAL;
+    END;
+    
+    -- Проверяем существование товара
+    SELECT COUNT(*) INTO product_exists 
+    FROM products 
+    WHERE id = p_product_id;
+    
+    IF product_exists = 0 THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Product not found';
+    END IF;
+    
+    -- Проверяем существование склада
+    SELECT COUNT(*) INTO warehouse_exists 
+    FROM warehouses 
+    WHERE id = p_warehouse_id;
+    
+    IF warehouse_exists = 0 THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Warehouse not found';
+    END IF;
+    
+    START TRANSACTION;
+    
+    -- Проверяем существование записи о stock
+    SELECT COUNT(*) INTO stock_exists 
+    FROM product_stocks 
+    WHERE product_id = p_product_id AND warehouse_id = p_warehouse_id;
+    
+    IF stock_exists = 0 THEN
+        -- Если записи нет и мы пытаемся добавить товар
+        IF p_quantity_change > 0 THEN
+            INSERT INTO product_stocks (product_id, warehouse_id, quantity)
+            VALUES (p_product_id, p_warehouse_id, p_quantity_change);
+        ELSE
+            SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Cannot remove quantity from non-existing stock';
+        END IF;
+    ELSE
+        -- Если запись существует, обновляем количество
+        SELECT quantity INTO current_quantity
+        FROM product_stocks 
+        WHERE product_id = p_product_id AND warehouse_id = p_warehouse_id;
+        
+        SET new_quantity = current_quantity + p_quantity_change;
+        
+        -- Проверяем, что новое количество не отрицательное
+        IF new_quantity < 0 THEN
+            SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Stock quantity cannot be negative';
+        END IF;
+        
+        IF new_quantity = 0 THEN
+            -- Если количество стало 0, удаляем запись
+            DELETE FROM product_stocks 
+            WHERE product_id = p_product_id AND warehouse_id = p_warehouse_id;
+        ELSE
+            -- Обновляем количество
+            UPDATE product_stocks 
+            SET quantity = new_quantity
+            WHERE product_id = p_product_id AND warehouse_id = p_warehouse_id;
+        END IF;
+    END IF;
+    
+    COMMIT;
+    
+    -- Возвращаем обновленную информацию
+    SELECT 
+        p.id as product_id,
+        p.name as product_name,
+        w.id as warehouse_id,
+        w.name as warehouse_name,
+        COALESCE(ps.quantity, 0) as current_quantity,
+        COALESCE(SUM(all_ps.quantity), 0) as total_quantity_all_warehouses
+    FROM products p
+    CROSS JOIN warehouses w
+    LEFT JOIN product_stocks ps ON p.id = ps.product_id AND w.id = ps.warehouse_id
+    LEFT JOIN product_stocks all_ps ON p.id = all_ps.product_id
+    WHERE p.id = p_product_id AND w.id = p_warehouse_id
+    GROUP BY p.id, p.name, w.id, w.name, ps.quantity;
+    
+END
+
+CREATE UpdateThermocup(
+    IN p_product_id INT,
+    IN p_name VARCHAR(255),
+    IN p_category_id INT,
+    IN p_base_price DECIMAL(10,2),
+    IN p_sku VARCHAR(100),
+    IN p_is_active BOOLEAN,
+    IN p_path_to_photo VARCHAR(255),
+    IN p_volume_ml INT,
+    IN p_color VARCHAR(100),
+    IN p_brand VARCHAR(255),
+    IN p_model VARCHAR(255),
+    IN p_is_hermetic BOOLEAN,
+    IN p_material VARCHAR(100)
+)
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        RESIGNAL;
+    END;
+    
+    START TRANSACTION;
+    
+    -- Обновляем основной товар
+    CALL UpdateProduct(
+        p_product_id, p_name, p_category_id, p_base_price, p_sku, p_is_active, p_path_to_photo
+    );
+    
+    -- Обновляем атрибуты термокружки
+    CALL UpdateThermocupAttributes(
+        p_product_id, p_volume_ml, p_color, p_brand, p_model, p_is_hermetic, p_material
+    );
+    
+    COMMIT;
+    
+    -- Возвращаем обновленный товар
+    CALL GetProductById(p_product_id);
+END
+
+CREATE UpdateThermocupAttributes(
+    IN p_product_id INT,
+    IN p_volume_ml INT,
+    IN p_color VARCHAR(100),
+    IN p_brand VARCHAR(255),
+    IN p_model VARCHAR(255),
+    IN p_is_hermetic BOOLEAN,
+    IN p_material VARCHAR(100)
+)
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        RESIGNAL;
+    END;
+    
+    START TRANSACTION;
+    
+    -- Проверяем, существует ли запись атрибутов
+    IF EXISTS (SELECT 1 FROM product_attributes_thermocups WHERE product_id = p_product_id) THEN
+        -- Обновляем существующую запись
+        UPDATE product_attributes_thermocups 
+        SET 
+            volume_ml = COALESCE(p_volume_ml, volume_ml),
+            color = COALESCE(p_color, color),
+            brand = COALESCE(p_brand, brand),
+            model = COALESCE(p_model, model),
+            is_hermetic = COALESCE(p_is_hermetic, is_hermetic),
+            material = COALESCE(p_material, material)
+        WHERE product_id = p_product_id;
+    ELSE
+        -- Создаем новую запись (если товар был создан без атрибутов)
+        INSERT INTO product_attributes_thermocups (
+            product_id, volume_ml, color, brand, model, is_hermetic, material
+        ) VALUES (
+            p_product_id,
+            p_volume_ml,
+            p_color,
+            p_brand,
+            p_model,
+            COALESCE(p_is_hermetic, 1),
+            p_material
+        );
+    END IF;
+    
+    COMMIT;
+END
