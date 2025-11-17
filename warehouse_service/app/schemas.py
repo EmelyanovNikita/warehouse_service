@@ -24,6 +24,7 @@ class Product(Base):
     sku = Column(String(100), unique=True)
     base_price = Column(Numeric(10, 2))  # Соответствует decimal(10,2) в БД
     total_quantity = Column(Integer, default=0)
+    num_reserved_goods = Column(Integer, default=0)
     is_active = Column(Boolean, default=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())

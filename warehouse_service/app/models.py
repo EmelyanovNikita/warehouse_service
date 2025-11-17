@@ -63,6 +63,7 @@ class ProductUpdateBase(BaseModel):
     sku: Optional[str] = None
     is_active: Optional[bool] = None
     path_to_photo: Optional[str] = None
+    num_reserved_goods: Optional[int] = 0
 
 class ThermocupAttributesUpdate(BaseModel):
     volume_ml: Optional[int] = None
@@ -104,7 +105,8 @@ class ProductResponse(BaseModel):
     category_name: str
     base_price: float
 
-    total_quantity: int #удалить
+    total_quantity: int
+    num_reserved_goods: Optional[int] = 0
     is_active: bool
 
     # Time of create/update of product
